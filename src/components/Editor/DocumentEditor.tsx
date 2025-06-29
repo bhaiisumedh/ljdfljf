@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import Mention from '@tiptap/extension-mention';
 import { 
   Bold, 
   Italic, 
@@ -36,62 +35,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const { request } = useApi();
 
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Mention.configure({
-        HTMLAttributes: {
-          class: 'mention',
-        },
-        suggestion: {
-          items: async ({ query }) => {
-            if (query.length < 2) return [];
-            
-            try {
-              const users = await request(`/users/search?q=${query}`);
-              return users;
-            } catch (error) {
-              return [];
-            }
-          },
-          render: () => {
-            let component: any;
-            let popup: any;
-
-            return {
-              onStart: (props: any) => {
-                component = new MentionList(props);
-                popup = tippy('body', {
-                  getReferenceClientRect: props.clientRect,
-                  appendTo: () => document.body,
-                  content: component.element,
-                  showOnCreate: true,
-                  interactive: true,
-                  trigger: 'manual',
-                  placement: 'bottom-start',
-                });
-              },
-              onUpdate(props: any) {
-                component.updateProps(props);
-                popup[0].setProps({
-                  getReferenceClientRect: props.clientRect,
-                });
-              },
-              onKeyDown(props: any) {
-                if (props.event.key === 'Escape') {
-                  popup[0].hide();
-                  return true;
-                }
-                return component.onKeyDown(props);
-              },
-              onExit() {
-                popup[0].destroy();
-                component.destroy();
-              },
-            };
-          },
-        },
-      }),
-    ],
+    extensions: [StarterKit],
     content: initialContent,
     editable: !readOnly,
     onUpdate: ({ editor }) => {
@@ -101,6 +45,18 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       }
     },
   });
+
+  // Update editor content when initialContent changes
+  useEffect(() => {
+    if (editor && initialContent !== editor.getHTML()) {
+      editor.commands.setContent(initialContent);
+    }
+  }, [initialContent, editor]);
+
+  // Update title when initialTitle changes
+  useEffect(() => {
+    setTitle(initialTitle);
+  }, [initialTitle]);
 
   // Auto-save functionality
   const debounceAutoSave = React.useCallback(
@@ -133,7 +89,9 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         toast.success('Document saved successfully');
       }
     } catch (error) {
-      toast.error('Failed to save document');
+      if (showToast) {
+        toast.error('Failed to save document');
+      }
     } finally {
       setIsSaving(false);
     }
@@ -267,83 +225,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     </div>
   );
 };
-
-// Mention component for user suggestions
-class MentionList {
-  items: any[];
-  selectedIndex: number;
-  element: HTMLElement;
-
-  constructor({ items }: { items: any[] }) {
-    this.items = items;
-    this.selectedIndex = 0;
-    this.element = document.createElement('div');
-    this.element.className = 'mention-suggestions';
-    this.render();
-  }
-
-  updateProps({ items }: { items: any[] }) {
-    this.items = items;
-    this.selectedIndex = 0;
-    this.render();
-  }
-
-  onKeyDown({ event }: { event: KeyboardEvent }) {
-    if (event.key === 'ArrowDown') {
-      this.selectedIndex = (this.selectedIndex + 1) % this.items.length;
-      this.render();
-      return true;
-    }
-
-    if (event.key === 'ArrowUp') {
-      this.selectedIndex = (this.selectedIndex + this.items.length - 1) % this.items.length;
-      this.render();
-      return true;
-    }
-
-    if (event.key === 'Enter') {
-      this.selectItem(this.selectedIndex);
-      return true;
-    }
-
-    return false;
-  }
-
-  selectItem(index: number) {
-    const item = this.items[index];
-    if (item) {
-      // This would be handled by the mention extension
-    }
-  }
-
-  render() {
-    if (this.items.length === 0) {
-      this.element.innerHTML = '<div class="mention-suggestion">No users found</div>';
-      return;
-    }
-
-    this.element.innerHTML = this.items
-      .map((item, index) => `
-        <div class="mention-suggestion ${index === this.selectedIndex ? 'selected' : ''}" 
-             data-index="${index}">
-          <div class="mention-user">
-            <strong>${item.name}</strong>
-            <div class="mention-email">${item.email}</div>
-          </div>
-        </div>
-      `)
-      .join('');
-
-    // Add click handlers
-    this.element.querySelectorAll('.mention-suggestion').forEach((element, index) => {
-      element.addEventListener('click', () => this.selectItem(index));
-    });
-  }
-
-  destroy() {
-    // Cleanup
-  }
-}
 
 // Debounce utility
 function debounce(func: Function, wait: number) {

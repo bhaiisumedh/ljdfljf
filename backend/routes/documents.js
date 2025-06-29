@@ -22,20 +22,47 @@ const updateDocumentSchema = z.object({
 // Get all documents (user's documents + shared documents)
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { data: documents, error } = await supabaseAdmin
+    // Get user's own documents
+    const { data: ownDocuments, error: ownError } = await supabaseAdmin
       .from('documents')
       .select(`
         *,
-        author:users!documents_author_id_fkey(id, first_name, last_name, email),
-        document_shares!inner(permission)
+        author:users!documents_author_id_fkey(id, first_name, last_name, email)
       `)
-      .or(`author_id.eq.${req.user.id},document_shares.user_id.eq.${req.user.id}`)
+      .eq('author_id', req.user.id)
       .order('updated_at', { ascending: false });
 
-    if (error) throw error;
+    if (ownError) throw ownError;
 
-    res.json(documents);
+    // Get shared documents
+    const { data: sharedDocuments, error: sharedError } = await supabaseAdmin
+      .from('document_shares')
+      .select(`
+        permission,
+        document:documents!inner(
+          *,
+          author:users!documents_author_id_fkey(id, first_name, last_name, email)
+        )
+      `)
+      .eq('user_id', req.user.id);
+
+    if (sharedError) throw sharedError;
+
+    // Combine and format results
+    const allDocuments = [
+      ...ownDocuments,
+      ...sharedDocuments.map(share => ({
+        ...share.document,
+        userPermission: share.permission
+      }))
+    ];
+
+    // Sort by updated_at
+    allDocuments.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+
+    res.json(allDocuments);
   } catch (error) {
+    console.error('Error fetching documents:', error);
     res.status(500).json({ error: 'Failed to fetch documents' });
   }
 });
@@ -87,6 +114,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
     res.json({ ...document, userPermission: share.permission });
   } catch (error) {
+    console.error('Error fetching document:', error);
     res.status(500).json({ error: 'Failed to fetch document' });
   }
 });
@@ -101,8 +129,8 @@ router.post('/', authenticateToken, async (req, res) => {
       .from('documents')
       .insert({
         id: documentId,
-        title,
-        content,
+        title: title || 'Untitled Document',
+        content: content || '',
         is_public: isPublic,
         author_id: req.user.id
       })
@@ -119,8 +147,8 @@ router.post('/', authenticateToken, async (req, res) => {
       .from('document_versions')
       .insert({
         document_id: documentId,
-        content,
-        title,
+        content: content || '',
+        title: title || 'Untitled Document',
         version_number: 1,
         created_by: req.user.id,
         change_summary: 'Initial version'
@@ -128,6 +156,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     res.status(201).json(document);
   } catch (error) {
+    console.error('Error creating document:', error);
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors });
     }
@@ -202,6 +231,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     res.json(updatedDocument);
   } catch (error) {
+    console.error('Error updating document:', error);
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors });
     }
@@ -239,6 +269,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     res.json({ message: 'Document deleted successfully' });
   } catch (error) {
+    console.error('Error deleting document:', error);
     res.status(500).json({ error: 'Failed to delete document' });
   }
 });
@@ -302,6 +333,7 @@ router.post('/:id/share', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Error sharing document:', error);
     res.status(500).json({ error: 'Failed to share document' });
   }
 });
@@ -339,6 +371,7 @@ router.get('/:id/shares', authenticateToken, async (req, res) => {
 
     res.json(shares);
   } catch (error) {
+    console.error('Error fetching shares:', error);
     res.status(500).json({ error: 'Failed to fetch shares' });
   }
 });
@@ -373,6 +406,7 @@ router.delete('/:id/shares/:userId', authenticateToken, async (req, res) => {
 
     res.json({ message: 'Share removed successfully' });
   } catch (error) {
+    console.error('Error removing share:', error);
     res.status(500).json({ error: 'Failed to remove share' });
   }
 });
@@ -423,6 +457,7 @@ router.get('/:id/versions', authenticateToken, async (req, res) => {
 
     res.json(versions);
   } catch (error) {
+    console.error('Error fetching versions:', error);
     res.status(500).json({ error: 'Failed to fetch versions' });
   }
 });
